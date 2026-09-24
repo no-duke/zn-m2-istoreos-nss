@@ -163,7 +163,7 @@ done
 if [ $QOSMIO_OK -eq 1 ]; then
     echo "    ✓ qosmio/openwrt-ipq @ $QBR 已克隆"
 
-    # 复制 NSS 内核补丁（按文件名匹配 nss/ecm/skb_recycler/mcs/cfi；排除 reserved-memory 避免与 iStoreOS 已有 0135 重复）
+    # 复制 NSS 内核补丁（按文件名匹配 nss/ecm/skb_recycler/mcs/cfi）
     SP="$NSS_TMP/q/target/linux/qualcommax/patches-6.x"
     [ -d "$SP" ] || SP="$NSS_TMP/q/target/linux/qualcommax/patches-6.12"
     if [ -d "$SP" ]; then
@@ -172,7 +172,11 @@ if [ $QOSMIO_OK -eq 1 ]; then
             n=$(basename "$f")
             # 仅复制 NSS 相关，且跳过已存在的同名补丁、跳过 reserved-memory（iStoreOS 已有 0135）
             if echo "$n" | grep -qiE 'nss|ecm|skb_recycler|mcs|cfi'; then
-                echo "$n" | grep -qi 'reserved-memory' && continue
+                # 跳过与所选 kmod 无关的客户端补丁，避免 6.12.94 上下文漂移导致编译失败：
+                #   vxlan  → 0603-5，对应 kmod-qca-nss-drv-vxlanmgr（本机未选）
+                #   tls-mgr→ 0603-8，对应 kmod-qca-nss-drv-tlsmgr    （本机未选）
+                #   ipsec  → 0607-2，对应 kmod-qca-nss-drv-ipsecmgr  （本机未选）
+                echo "$n" | grep -qiE 'reserved-memory|vxlan|tls-mgr|ipsec' && continue
                 [ -f "$PATCHDIR/$n" ] && { echo "      ~ 跳过已存在: $n"; continue; }
                 cp "$f" "$PATCHDIR/" && cnt=$((cnt+1))
             fi
@@ -181,6 +185,18 @@ if [ $QOSMIO_OK -eq 1 ]; then
     else
         echo "    ⚠ 未找到 qosmio 的 patches 目录: $SP"
     fi
+
+    # 防御性清理：删除目标目录里任何残留的 vxlan/tls-mgr/ipsec 内核补丁。
+    # 原因：iStoreOS 25.12 内核为 6.12.94，而 qosmio 的 vxlan 客户端补丁在该版本上
+    #       上下文漂移（Hunk #5 失败），且本机未选对应 kmod，删之无副作用、保编译通过。
+    for bad in vxlan tls-mgr ipsec; do
+        found=$(find "$PATCHDIR" -maxdepth 1 -type f -iname "*${bad}*" 2>/dev/null)
+        if [ -n "$found" ]; then
+            echo "$found" | while read -r pf; do
+                rm -f "$pf" && echo "      🗑 已删除残留补丁: $(basename "$pf")"
+            done
+        fi
+    done
 
     # 复制 nss.dtsi
     nd=$(find "$NSS_TMP/q" -name 'ipq6018-nss.dtsi' | head -1)
