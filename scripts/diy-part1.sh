@@ -134,7 +134,7 @@ echo "=============================================================="
 echo "[B1] 追加 NSS feeds (nss-packages + sqm-scripts-nss + istore)"
 if [ -f feeds.conf.default ]; then
     grep -q 'nss-packages' feeds.conf.default || \
-        echo 'src-git nss_packages https://github.com/qosmio/nss-packages.git;NSS-12.x-K6.x' >> feeds.conf.default
+        echo 'src-git nss_packages https://github.com/qosmio/nss-packages.git;NSS-12.5-K6.x' >> feeds.conf.default
     grep -q 'sqm-scripts-nss' feeds.conf.default || \
         echo 'src-git sqm_nss https://github.com/qosmio/sqm-scripts-nss.git' >> feeds.conf.default
     grep -q 'linkease/istore' feeds.conf.default || \
@@ -152,7 +152,7 @@ fi
 NSS_TMP=$(mktemp -d)
 QOSMIO_OK=0
 QBR=""
-for br in NSS-12.x-K6.x openwrt-25.12 NSS-12.5-K6.x; do
+for br in 25.12-nss main-nss 24.10-nss; do
     echo "    尝试克隆 qosmio/openwrt-ipq @ $br ..."
     rm -rf "$NSS_TMP/q" 2>/dev/null || true
     if git clone --depth 1 -b "$br" https://github.com/qosmio/openwrt-ipq "$NSS_TMP/q" 2>/dev/null; then
