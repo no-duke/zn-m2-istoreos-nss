@@ -139,6 +139,10 @@ jobs:
         grep -n "source-only" target/linux/qualcommax/ipq60xx/target.mk || echo "  已移除 ✓"
         echo "--- NSS 包是否进入选择 ---"
         grep -E "kmod-qca-nss-drv=|nss-firmware-ipq60xx=|luci-app-nss-status=" .config || echo "!!! NSS 包未选中"
+        echo "--- 用户刚需前端是否进入选择（cpufreq / 温度统计 / 代理）---"
+        grep -E "luci-app-cpufreq=|luci-app-statistics=|luci-app-homeproxy=" .config || echo "!!! 刚需前端未选中（可能被依赖丢弃）"
+        echo "--- HomeProxy 后端是否选中（前端依赖，缺失会拖垮前端）---"
+        grep -E "homeproxy=" .config || echo "!!! homeproxy 后端未选中"
         echo "================================"
 
     - name: 下载依赖包
@@ -208,7 +212,7 @@ jobs:
           ### 已集成
           - iStore 应用商店（原生）
           - NSS 状态查看（luci-app-nss-status）
-          - CPU 跑分（coremark）/ CPU 频率（luci-app-cpufreq）/ 温度
+          - CPU 跑分（coremark）/ CPU 频率（luci-app-cpufreq）/ 温度（cpufreq 实时 + LuCI 统计趋势图）
           - ZeroTier（内网穿透）
           - nlbwmon（流量监控）
           - 代理（HomeProxy / OpenClash 可选）

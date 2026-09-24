@@ -21,7 +21,7 @@ iStoreOS 25.12 与 LibWrt 25.12-nss 共享 OpenWrt 25.12 的 `qualcommax` 基础
 .github/workflows/build.yml   编译工作流（克隆 iStoreOS 25.12 → 注入 → 编译 → 发布）
 scripts/diy-part1.sh          步骤 A：zn_m2 设备/网口/LED 注入；步骤 B：NSS 使能（feeds+补丁+dtsi+DTS）
 scripts/diy-part2.sh          默认 IP / 首次启动 uci-defaults
-configs/zn-m2.config          包选择（NSS 全开 + iStore + 无 WiFi + Docker 默认不装）
+configs/zn-m2.config          包选择（NSS 全开 + iStore + 无 WiFi + Docker 默认不装 + 温度/代理前端补齐）
 patch/ipq6000-m2.dts          fallback 设备树（上游拉取失败时使用）
 ```
 
@@ -29,6 +29,8 @@ patch/ipq6000-m2.dts          fallback 设备树（上游拉取失败时使用�
 1. **NSS 补丁/DTS 拉取依赖 CI 网络**：步骤 B 克隆 `qosmio/openwrt-ipq`（退路 `LiBwrt/LibWrt`）。CI 网络可靠；若失败，构建日志会明确报 `ipq6018-nss.dtsi 缺失`。
 2. **reserved-memory 不重复**：iStoreOS 已有 `0135`，步骤 B 复制补丁时显式跳过 `reserved-memory`，避免重复打补丁。
 3. **设备 DTS 来源**：优先用上游 `qcom-ipq6018-cmiot-ax18.dts` 改编为 `zn,m2`；该 DTS 自带 board 节点（mdio/switch/dp/edma），仅需 `ipq6018-nss.dtsi` 在场即可编译。
+4. **代理前端依赖（24.10 教训）**：`luci-app-homeproxy` 仅是前端，真正的 `homeproxy` 后端由 `diy-part1.sh` 步骤 B 注入的 `immortalwrt/homeproxy` feed 提供。若只选前端、缺后端 feed，defconfig 会因依赖缺失**静默丢弃**前端——故 config 中显式 `CONFIG_PACKAGE_homeproxy=y`，CI 校验也会 grep 该后端。
+5. **温度前端**：CPU 实时温度由 `luci-app-cpufreq` 主页显示；历史趋势图由 `luci-app-statistics` + `collectd-mod-thermal`（rrdtool 约 +1~1.5MB）提供。若需极致精简可注释掉统计段。
 
 ## 使用
 在 GitHub Actions 手动触发 `Build-ZN-M2-iStoreOS-NSS`（workflow_dispatch）。

@@ -139,6 +139,10 @@ if [ -f feeds.conf.default ]; then
         echo 'src-git sqm_nss https://github.com/qosmio/sqm-scripts-nss.git' >> feeds.conf.default
     grep -q 'linkease/istore' feeds.conf.default || \
         echo 'src-git istore https://github.com/linkease/istore.git' >> feeds.conf.default
+    # HomeProxy 后端 feed（immortalwrt/homeproxy 同时提供 homeproxy 后端 + luci-app-homeproxy 前端）
+    # 24.10 教训：仅选 luci-app-homeproxy 而缺后端 homeproxy feed → 前端因依赖缺失被静默丢弃
+    grep -q 'immortalwrt/homeproxy' feeds.conf.default || \
+        echo 'src-git homeproxy https://github.com/immortalwrt/homeproxy.git;master' >> feeds.conf.default
     echo "    ✓ feeds 已追加"
 else
     echo "    !! feeds.conf.default 不存在"
