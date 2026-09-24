@@ -1,0 +1,36 @@
+# 兆能 M2 (ZN M2) —— iStoreOS 25.12 原生 + NSS 硬件加速 云编译工程
+
+## 目标
+- **iStoreOS 25.12 原生**（内核 6.12，保留原生界面 + iStore 商店）
+- **NSS 硬件加速**（IPQ6000 网络卸载：NAT / PPPoE / 流量卸载，CPU 占用降至个位数）
+- **无 WiFi**（用户不需要，省体积）
+- 默认地址 `192.168.12.1`，root / password，网口 `wan + lan1 lan2 lan3`
+
+## 与 LibWrt 备份的关系
+- 本工程是**主线**（iStoreOS 原生 + NSS）。
+- `no-duke/zn-m2-libwrt-nss`（LibWrt 25.12-nss，run `35944637064`）作为**对照/备用**，验证 NSS 本身可用。
+
+## 移植原理（为什么能成）
+iStoreOS 25.12 与 LibWrt 25.12-nss 共享 OpenWrt 25.12 的 `qualcommax` 基础：
+- 两者 102/103 个 `patches-6.12` 完全相同 → 内核基础一致。
+- iStoreOS 已自带 `0135-ipq6018-add-NSS-reserved-memory`（NSS reserved-memory 地基已在）。
+- 缺失的只是 **23 个 NSS 内核补丁** + `ipq6018-nss.dtsi` + zn_m2 设备定义，由 `diy-part1.sh` 步骤 B 从 `qosmio/openwrt-ipq`（权威 NSS 源，LibWrt 亦源于此）拉取注入。
+
+## 文件结构
+```
+.github/workflows/build.yml   编译工作流（克隆 iStoreOS 25.12 → 注入 → 编译 → 发布）
+scripts/diy-part1.sh          步骤 A：zn_m2 设备/网口/LED 注入；步骤 B：NSS 使能（feeds+补丁+dtsi+DTS）
+scripts/diy-part2.sh          默认 IP / 首次启动 uci-defaults
+configs/zn-m2.config          包选择（NSS 全开 + iStore + 无 WiFi + Docker 默认不装）
+patch/ipq6000-m2.dts          fallback 设备树（上游拉取失败时使用）
+```
+
+## 关键风险点
+1. **NSS 补丁/DTS 拉取依赖 CI 网络**：步骤 B 克隆 `qosmio/openwrt-ipq`（退路 `LiBwrt/LibWrt`）。CI 网络可靠；若失败，构建日志会明确报 `ipq6018-nss.dtsi 缺失`。
+2. **reserved-memory 不重复**：iStoreOS 已有 `0135`，步骤 B 复制补丁时显式跳过 `reserved-memory`，避免重复打补丁。
+3. **设备 DTS 来源**：优先用上游 `qcom-ipq6018-cmiot-ax18.dts` 改编为 `zn,m2`；该 DTS 自带 board 节点（mdio/switch/dp/edma），仅需 `ipq6018-nss.dtsi` 在场即可编译。
+
+## 使用
+在 GitHub Actions 手动触发 `Build-ZN-M2-iStoreOS-NSS`（workflow_dispatch）。
+产物发布到 Releases：`ZN-M2-iStoreOS-25.12-NSS`。
+刷机：暗云 U-Boot 网页 → 只点「固件」→ 用 `*nand-factory.ubi` 或 `*squashfs-factory.ubi`。

@@ -1,0 +1,223 @@
+name: Build-ZN-M2-iStoreOS-NSS
+
+# ============================================================================
+# 兆能 M2 (ZN M2) —— iStoreOS 25.12 原生 + NSS 硬件加速 云编译
+# ----------------------------------------------------------------------------
+# 源码 : istoreos/istoreos   分支 istoreos-25.12   （内核 6.12）
+# 目标 : qualcommax / ipq60xx / zn_m2
+# 特点 : iStoreOS 原生界面 + iStore 商店 + NSS 硬件加速（IPQ6000 网络卸载）
+#        无 WiFi（用户不需要）+ 大 overlay + 预装 ZeroTier/流量监控/CPU工具
+# 默认 : 192.168.12.1
+#
+# 移植说明：iStoreOS 25.12 的 ipq60xx 不含 zn_m2，需在编译前注入
+#           DTS + 设备定义 + 网口 + LED（diy-part1.sh 步骤 A）；
+#           NSS 硬件加速通过 diy-part1.sh 步骤 B 从 qosmio/LibWrt 拉取
+#           内核补丁 + nss.dtsi + 设备 DTS 注入。
+# ============================================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: '发布到 Releases'
+        required: false
+        default: 'true'
+
+env:
+  REPO_URL: https://github.com/istoreos/istoreos.git
+  REPO_BRANCH: istoreos-25.12
+  CONFIG_FILE: configs/zn-m2.config
+  DIY_P1_SH: scripts/diy-part1.sh
+  DIY_P2_SH: scripts/diy-part2.sh
+  FIRMWARE_TAG: ZN-M2-iStoreOS-25.12-NSS
+  TZ: Asia/Shanghai
+
+jobs:
+  Build:
+    runs-on: ubuntu-22.04
+
+    steps:
+    # ------------------------------------------------------------------
+    - name: 环境检查
+      run: |
+        echo "--------------------------CPU--------------------------"
+        echo -e "$(cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c)"
+        echo "--------------------------内存--------------------------"
+        echo -e "$(sudo lshw -short -C memory | grep GiB)"
+        echo "--------------------------磁盘--------------------------"
+        df -hT
+
+    # ------------------------------------------------------------------
+    - name: 初始化编译环境
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      run: |
+        sudo rm -rf /usr/share/dotnet /etc/apt/sources.list.d /usr/local/lib/android $AGENT_TOOLSDIRECTORY
+        sudo -E apt-get -y purge azure-cli ghc* zulu* llvm* firefox google* dotnet* powershell openjdk* mongodb* moby* || true
+        sudo -E apt-get -y update
+        sudo -E apt-get -y install ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+          bzip2 ccache cmake cpio curl device-tree-compiler fastjar flex gawk gettext gcc-multilib g++-multilib \
+          git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libglib2.0-dev libgmp3-dev libltdl-dev \
+          libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libreadline-dev libssl-dev libtool lrzsz \
+          mkisofs msmtp nano ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools \
+          libpython3-dev qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip \
+          vim wget xmlto xxd zlib1g-dev
+        sudo timedatectl set-timezone "$TZ"
+        sudo -E apt-get -y autoremove --purge
+        sudo -E apt-get -y clean
+
+    # ------------------------------------------------------------------
+    - name: 扩磁盘
+      uses: easimon/maximize-build-space@master
+      with:
+        swap-size-mb: 1024
+        temp-reserve-mb: 100
+        root-reserve-mb: 1024
+
+    - name: 拉取仓库
+      uses: actions/checkout@main
+
+    # ------------------------------------------------------------------
+    - name: 克隆 iStoreOS 源码
+      run: |
+        df -hT $GITHUB_WORKSPACE
+        echo ">>> 源码: $REPO_URL"
+        echo ">>> 分支: $REPO_BRANCH"
+        git clone --depth 1 -b $REPO_BRANCH $REPO_URL openwrt
+        cd openwrt
+        echo "OPENWRT_PATH=$PWD" >> $GITHUB_ENV
+        echo "=== 源码最新提交 ==="
+        git log -1 --date=short --format="%cd  %h  %s"
+        VERSION_INFO=$(git show -s --date=short --format="作者: %an | 时间: %cd | %s")
+        echo "VERSION_INFO=$VERSION_INFO" >> $GITHUB_ENV
+        echo "=== 内核版本线索 ==="
+        ls target/linux/qualcommax/ | grep config-
+
+    # ------------------------------------------------------------------
+    # 移植注入 + NSS 使能 —— 必须在 defconfig 之前
+    - name: 【移植+NSS】注入设备定义 / DTS / 网口 / LED / NSS补丁
+      run: |
+        chmod +x $DIY_P1_SH
+        cd openwrt
+        bash $GITHUB_WORKSPACE/$DIY_P1_SH
+
+    - name: 安装 feeds
+      run: |
+        cd $OPENWRT_PATH
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    - name: 【定制】改默认 IP / 包调整
+      run: |
+        chmod +x $DIY_P2_SH
+        cd $OPENWRT_PATH
+        bash $GITHUB_WORKSPACE/$DIY_P2_SH
+
+    # ------------------------------------------------------------------
+    - name: 载入配置并校验
+      run: |
+        cp $CONFIG_FILE $OPENWRT_PATH/.config
+        cd $OPENWRT_PATH
+        make defconfig
+        echo "================================"
+        echo "  配置校验"
+        echo "================================"
+        grep -E "CONFIG_TARGET_(qualcommax|SUBTARGET|DEVICE_qualcommax_ipq60xx_DEVICE_zn_m2)" .config || true
+        grep -i "zn_m2" .config || echo "!!! 警告: .config 中未见 zn_m2"
+        echo "--- 设备定义是否注入成功 ---"
+        grep -c "define Device/zn_m2" target/linux/qualcommax/image/ipq60xx.mk || echo "!!! 设备定义缺失"
+        echo "--- DTS 是否就位 ---"
+        ls -la target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq6000-m2.dts || echo "!!! DTS 缺失"
+        ls -la target/linux/qualcommax/files/arch/arm64/boot/dts/qcom/ipq6018-nss.dtsi || echo "!!! nss.dtsi 缺失"
+        echo "--- NSS 内核补丁数 ---"
+        ls target/linux/qualcommax/patches-6.12/ | grep -ciE 'nss|ecm|skb_recycler|mcs|cfi' || echo "0"
+        echo "--- 网口配置 ---"
+        grep -A2 "zn,m2" target/linux/qualcommax/ipq60xx/base-files/etc/board.d/02_network || echo "!!! 02_network 未含 zn,m2"
+        echo "--- LED 配置 ---"
+        grep -A5 "zn,m2" target/linux/qualcommax/ipq60xx/base-files/etc/board.d/01_leds || echo "!!! 01_leds 未含 zn,m2"
+        echo "--- source-only 是否已移除 ---"
+        grep -n "source-only" target/linux/qualcommax/ipq60xx/target.mk || echo "  已移除 ✓"
+        echo "--- NSS 包是否进入选择 ---"
+        grep -E "kmod-qca-nss-drv=|nss-firmware-ipq60xx=|luci-app-nss-status=" .config || echo "!!! NSS 包未选中"
+        echo "================================"
+
+    - name: 下载依赖包
+      run: |
+        cd $OPENWRT_PATH
+        make download -j8
+        find dl -size -1024c -exec ls -l {} \; || true
+        find dl -size -1024c -exec rm -f {} \; || true
+
+    # ------------------------------------------------------------------
+    - name: 编译固件
+      id: compile
+      run: |
+        cd $OPENWRT_PATH
+        echo -e "$(nproc) 线程编译"
+        make -j$(nproc) || make -j1 || make -j1 V=s
+        echo "status=success" >> $GITHUB_OUTPUT
+        echo "DATE=$(date +'%Y-%m-%d %H:%M:%S')" >> $GITHUB_ENV
+        echo "FILE_DATE=$(date +'%Y.%m.%d')" >> $GITHUB_ENV
+
+    - name: 检查磁盘
+      if: (!cancelled())
+      run: df -hT
+
+    # ------------------------------------------------------------------
+    - name: 整理产物
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        cd $OPENWRT_PATH/bin/targets/*/*
+        cat sha256sums || true
+        cp $OPENWRT_PATH/.config build.config
+        echo "FIRMWARE_PATH=$PWD" >> $GITHUB_ENV
+        echo "=== 产物清单 ==="
+        ls -lh
+        echo "=== zn_m2 固件 ==="
+        ls -lh *zn_m2* 2>/dev/null || echo "!! 未找到 zn_m2 固件"
+        echo "=== 固件体积（关键指标）==="
+        du -h *zn_m2*squashfs*.ubi 2>/dev/null || true
+
+    - name: 上传 Artifacts
+      if: steps.compile.outputs.status == 'success'
+      uses: actions/upload-artifact@main
+      with:
+        name: zn-m2-istoreos-nss-${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE_PATH }}
+
+    - name: 发布 Releases
+      if: steps.compile.outputs.status == 'success'
+      uses: ncipollo/release-action@v1
+      with:
+        name: R${{ env.DATE }} for ${{ env.FIRMWARE_TAG }}
+        allowUpdates: true
+        tag: ${{ env.FIRMWARE_TAG }}
+        token: ${{ secrets.GITHUB_TOKEN }}
+        artifacts: ${{ env.FIRMWARE_PATH }}/*
+        body: |
+          **兆能 M2 (ZN M2) iStoreOS 25.12 原生 + NSS 硬件加速**
+
+          ### 固件信息
+          - 设备：兆能 M2 / 高通 IPQ6000
+          - 系统：iStoreOS 25.12（内核 6.12）· 原生界面 + iStore 商店
+          - 加速：NSS 网络子系统（NAT/PPPoE/流量卸载，CPU 占用降至个位数）
+          - 默认地址：**192.168.12.1**
+          - 用户 / 密码：root / password
+          - 网口：wan + lan1 lan2 lan3
+
+          ### 已集成
+          - iStore 应用商店（原生）
+          - NSS 状态查看（luci-app-nss-status）
+          - CPU 跑分（coremark）/ CPU 频率（luci-app-cpufreq）/ 温度
+          - ZeroTier（内网穿透）
+          - nlbwmon（流量监控）
+          - 代理（HomeProxy / OpenClash 可选）
+
+          ### 刷机
+          - 走暗云 U-Boot 网页 → **只点「固件」入口**
+          - 用 `*nand-factory.ubi` 或 `*squashfs-factory.ubi`
+          - 刷前确认 CDT/ART 备份在手
+
+          ### 源码
+          ${{ env.REPO_URL }} @ ${{ env.REPO_BRANCH }}
+          ${{ env.VERSION_INFO }}
