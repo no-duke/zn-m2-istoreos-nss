@@ -198,6 +198,17 @@ if [ $QOSMIO_OK -eq 1 ]; then
         fi
     done
 
+    # B2.4 skb_recycler 刷新覆盖：6.12.94 上下文漂移（原 qosmio 版 Hunk #29 在
+    #       net/core/skbuff.c:7070 失败），必须用本地刷新版覆盖 qosmio 原始拷贝。
+    #       该补丁为 kmod-qca-nss-drv 必需（不可排除），故刷新而非删除。
+    LOCAL_SKB="$PATCH_SRC/patches-6.12/0981-1-qca-skb_recycler-support.patch"
+    if [ -f "$LOCAL_SKB" ]; then
+        cp "$LOCAL_SKB" "$PATCHDIR/0981-1-qca-skb_recycler-support.patch"
+        echo "    ✓ 已用本地刷新版覆盖 skb_recycler 补丁（6.12.94 适配）"
+    else
+        echo "    ⚠ 本地刷新版 skb_recycler 缺失，将沿用 qosmio 原始版（可能编译失败）"
+    fi
+
     # 复制 nss.dtsi
     nd=$(find "$NSS_TMP/q" -name 'ipq6018-nss.dtsi' | head -1)
     if [ -n "$nd" ]; then

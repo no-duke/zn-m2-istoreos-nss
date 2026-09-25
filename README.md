@@ -32,6 +32,7 @@ patch/ipq6000-m2.dts          fallback 设备树（上游拉取失败时使用�
 4. **代理前端依赖（24.10 教训）**：`luci-app-homeproxy` 仅是前端，真正的 `homeproxy` 后端由 `diy-part1.sh` 步骤 B 注入的 `immortalwrt/homeproxy` feed 提供。若只选前端、缺后端 feed，defconfig 会因依赖缺失**静默丢弃**前端——故 config 中显式 `CONFIG_PACKAGE_homeproxy=y`，CI 校验也会 grep 该后端。
 5. **温度前端**：CPU 实时温度由 `luci-app-cpufreq` 主页显示；历史趋势图由 `luci-app-statistics` + `collectd-mod-thermal`（rrdtool 约 +1~1.5MB）提供。若需极致精简可注释掉统计段。
 6. **NSS 客户端补丁与 6.12.94 的上下文漂移**：qosmio 的 `25.12-nss` 与 iStoreOS 25.12 同为 `KERNEL_PATCHVER:=6.12`，但内核小版本不同。实测 `0603-5-qca-nss-clients-add-vxlan-support.patch` 在 `linux-6.12.94` 的 `vxlan_core.c` 上 Hunk #5 上下文漂移、打补丁失败（首个失败点即中断整套补丁应用）。步骤 B 因此**排除**与所选 kmod 无关的客户端补丁：`vxlan`(0603-5)、`tls-mgr`(0603-8)、`ipsec`(0607-2)——本机 config 未选 `kmod-qca-nss-drv-vxlanmgr/tlsmgr/ipsecmgr`，删除无副作用。若日后需要 VXLAN/TLS/IPsec 卸载，需将对应补丁 `git apply` 刷新到 6.12.94 后再加入。
+7. **skb_recycler 必需补丁已刷新**：`0981-1-qca-skb_recycler-support.patch` 同为 6.12.94 漂移补丁（Hunk #29 在 `net/core/skbuff.c:7070` 失败），但它**不可排除**——`kmod-qca-nss-drv` 依赖它。因此本仓库自带刷新版 `patch/patches-6.12/0981-1-qca-skb_recycler-support.patch`（基于 linux-6.12.94 真身 `git diff` 生成，已通过 `git apply --check` 严格校验），步骤 B2.4 用它**覆盖** qosmio 原始拷贝。切勿恢复为 qosmio 原始版。
 
 ## 使用
 在 GitHub Actions 手动触发 `Build-ZN-M2-iStoreOS-NSS`（workflow_dispatch）。
